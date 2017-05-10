@@ -1,0 +1,748 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "storageName": {
+            "defaultValue": "crhstoryage",
+            "type": "String",
+            "metadata": {
+                "description": "存储账户名称(只有小写英文字母和数字有效)"
+            }
+        },
+        "storageAccountType": {
+            "defaultValue": "Standard_LRS",
+            "type": "String",
+            "metadata": {
+                "description": "存储账户类型(默认是 Standard_LRS)"
+            }
+        },
+        "vmSize": {
+            "defaultValue": "Standard_D1",
+            "type": "String",
+            "metadata": {
+                "description": "部署集群的虚拟机大小(默认是 Standard_D2，建议虚拟机大小最小是 Standard_D2)"
+            }
+        },
+        "CentOSVersion": {
+            "defaultValue": "6.5",
+            "allowedValues": [
+                "6.5",
+                "6.6",
+                "6.7",
+                "6.8"
+            ],
+            "type": "String",
+            "metadata": {
+                "description": "操作系统默认是 CentOS 6.5(可选择 CentOS 6.5, 6.6, 6.7, 6.8.)等版本"
+            }
+        },
+        "vmCount": {
+            "defaultValue": 4,
+            "minValue": 3,
+            "maxValue": 50,
+            "type": "Int",
+            "metadata": {
+                "description": "集群虚拟机个数,最小3台(1个客户端,1个主节点,1+个从节点)"
+            }
+        }
+    },
+    "variables": {
+        "adminUsername": "crhuser",
+        "adminPassword": "Redoop123!",
+        "resourceAPIVersion": "2015-06-15",
+        "imagePublisher": "OpenLogic",
+        "imageOffer": "CentOS",
+        "vmAvaM": "crhSServer",
+        "vmAvaC": "crhSClient",
+        "vmAvaN": "crhSAgent",
+        "vmNameM": "master",
+        "vmNameC": "client",
+        "vmNameN": "node",
+        "storageNameM": "[concat(parameters('storageName'), 'm')]",
+        "storageNameC": "[concat(parameters('storageName'), 'c')]",
+        "storageNameN": "[concat(parameters('storageName'), 'n')]",
+        "addressPrefix": "10.0.0.0/16",
+        "subnetName": "subnet",
+        "subnetPrefix": "10.0.0.0/24",
+        "vnetName": "redoop-crh",
+        "NodeNum": "[sub(parameters('vmCount'),2)]",
+        "publicIPAddressName": "myPublicIP",
+        "publicIPAddressClientName": "myClinetPublicIP",
+        "publicIPAddressType": "Dynamic",
+        "serverAddr": "10.0.0.254",
+        "clientAddr": "10.0.0.80",
+        "agentAddr": "10.0.0.",
+        "nicNameM": "myVMNicm",
+        "nicNameC": "myVMNicc",
+        "nicNameN": "myVMNicn",
+        "setupSHuri": "https://raw.githubusercontent.com/weiGGguo/Azure-CRH/master",
+        "vmStorageAccountContainerName": "vhds",
+        "OSDiskName": "osdiskforlinuxsimple",
+        "dataDisk1VhdName": "datadisk1",
+        "securityGroupName": "crhSecurityGroup",
+        "ClientsecurityGroupName": "crhClientSecurityGroup"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Compute/availabilitySets",
+            "name": "[variables('vmAvaM')]",
+            "apiVersion": "[variables('resourceAPIVersion')]",
+            "location": "[resourceGroup().location]",
+            "properties": {}
+        },
+        {
+            "type": "Microsoft.Compute/availabilitySets",
+            "name": "[variables('vmAvaC')]",
+            "apiVersion": "[variables('resourceAPIVersion')]",
+            "location": "[resourceGroup().location]",
+            "properties": {}
+        },
+        {
+            "type": "Microsoft.Compute/availabilitySets",
+            "name": "[variables('vmAvaN')]",
+            "apiVersion": "[variables('resourceAPIVersion')]",
+            "location": "[resourceGroup().location]",
+            "properties": {}
+        },
+        {
+            "type": "Microsoft.Network/networkSecurityGroups",
+            "name": "[variables('securityGroupName')]",
+            "apiVersion": "[variables('resourceAPIVersion')]",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "securityRules": [
+                    {
+                        "name": "SSH",
+                        "properties": {
+                            "description": "Allows SSH traffic",
+                            "protocol": "Tcp",
+                            "sourcePortRange": "*",
+                            "destinationPortRange": "22",
+                            "sourceAddressPrefix": "*",
+                            "destinationAddressPrefix": "*",
+                            "access": "Allow",
+                            "priority": 100,
+                            "direction": "Inbound"
+                        }
+                    },
+                    {
+                        "name": "NamenodeWeb",
+                        "properties": {
+                            "description": "namenodeWeb",
+                            "protocol": "Tcp",
+                            "sourcePortRange": "*",
+                            "destinationPortRange": "50070",
+                            "sourceAddressPrefix": "*",
+                            "destinationAddressPrefix": "*",
+                            "access": "Allow",
+                            "priority": 101,
+                            "direction": "Inbound"
+                        }
+                    },
+                    {
+                        "name": "DatanodeControl",
+                        "properties": {
+                            "description": "datanode control port",
+                            "protocol": "Tcp",
+                            "sourcePortRange": "*",
+                            "destinationPortRange": "50010",
+                            "sourceAddressPrefix": "*",
+                            "destinationAddressPrefix": "*",
+                            "access": "Allow",
+                            "priority": 102,
+                            "direction": "Inbound"
+                        }
+                    },
+                    {
+                        "name": "CRHAdmin",
+                        "properties": {
+                            "description": "CRHAdmin port",
+                            "protocol": "Tcp",
+                            "sourcePortRange": "*",
+                            "destinationPortRange": "8080",
+                            "sourceAddressPrefix": "*",
+                            "destinationAddressPrefix": "*",
+                            "access": "Allow",
+                            "priority": 103,
+                            "direction": "Inbound"
+                        }
+                    },
+                    {
+                        "name": "Licence",
+                        "properties": {
+                            "description": "Licence port",
+                            "protocol": "Tcp",
+                            "sourcePortRange": "*",
+                            "destinationPortRange": "9999",
+                            "sourceAddressPrefix": "*",
+                            "destinationAddressPrefix": "*",
+                            "access": "Allow",
+                            "priority": 104,
+                            "direction": "Inbound"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.Network/networkSecurityGroups",
+            "name": "[concat(variables('securityGroupName'),'-sg')]",
+            "apiVersion": "[variables('resourceAPIVersion')]",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "securityRules": [
+                    {
+                        "name": "SSH",
+                        "properties": {
+                            "description": "Allows SSH traffic",
+                            "protocol": "Tcp",
+                            "sourcePortRange": "*",
+                            "destinationPortRange": "22",
+                            "sourceAddressPrefix": "*",
+                            "destinationAddressPrefix": "*",
+                            "access": "Allow",
+                            "priority": 100,
+                            "direction": "Inbound"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.Network/networkSecurityGroups",
+            "name": "[variables('ClientsecurityGroupName')]",
+            "apiVersion": "[variables('resourceAPIVersion')]",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "securityRules": [
+                    {
+                        "name": "SSH",
+                        "properties": {
+                            "description": "Allows SSH traffic",
+                            "protocol": "Tcp",
+                            "sourcePortRange": "*",
+                            "destinationPortRange": "22",
+                            "sourceAddressPrefix": "*",
+                            "destinationAddressPrefix": "*",
+                            "access": "Allow",
+                            "priority": 100,
+                            "direction": "Inbound"
+                        }
+                    },
+                    {
+                        "name": "NamenodeWeb",
+                        "properties": {
+                            "description": "namenodeWeb",
+                            "protocol": "Tcp",
+                            "sourcePortRange": "*",
+                            "destinationPortRange": "50070",
+                            "sourceAddressPrefix": "*",
+                            "destinationAddressPrefix": "*",
+                            "access": "Allow",
+                            "priority": 101,
+                            "direction": "Inbound"
+                        }
+                    },
+                    {
+                        "name": "DatanodeControl",
+                        "properties": {
+                            "description": "datanode control port",
+                            "protocol": "Tcp",
+                            "sourcePortRange": "*",
+                            "destinationPortRange": "50010",
+                            "sourceAddressPrefix": "*",
+                            "destinationAddressPrefix": "*",
+                            "access": "Allow",
+                            "priority": 102,
+                            "direction": "Inbound"
+                        }
+                    },
+                    {
+                        "name": "HadoopWeb",
+                        "properties": {
+                            "description": "Hadoop Web Port",
+                            "protocol": "Tcp",
+                            "sourcePortRange": "*",
+                            "destinationPortRange": "8088",
+                            "sourceAddressPrefix": "*",
+                            "destinationAddressPrefix": "*",
+                            "access": "Allow",
+                            "priority": 103,
+                            "direction": "Inbound"
+                        }
+                    },
+                    {
+                        "name": "ResourceManager",
+                        "properties": {
+                            "description": "Resource Manager Port",
+                            "protocol": "Tcp",
+                            "sourcePortRange": "*",
+                            "destinationPortRange": "8030",
+                            "sourceAddressPrefix": "*",
+                            "destinationAddressPrefix": "*",
+                            "access": "Allow",
+                            "priority": 104,
+                            "direction": "Inbound"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "type": "Microsoft.Network/virtualNetworks",
+            "name": "[variables('vnetName')]",
+            "apiVersion": "[variables('resourceAPIVersion')]",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "addressSpace": {
+                    "addressPrefixes": [
+                        "[variables('addressPrefix')]"
+                    ]
+                },
+                "subnets": [
+                    {
+                        "name": "[variables('subnetName')]",
+                        "properties": {
+                            "addressPrefix": "[variables('subnetPrefix')]"
+                        },
+                        "networkSecurityGroup": {
+                            "id": "[resourceId('Microsoft.Network/networkSecurityGroups', concat(variables('securityGroupName'),'-sg'))]"
+                        }
+                    }
+                ]
+            },
+            "dependsOn": [
+                "[concat('Microsoft.Network/networkSecurityGroups/', variables('securityGroupName'),'-sg')]"
+            ]
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts",
+            "name": "[variables('storageNameM')]",
+            "apiVersion": "[variables('resourceAPIVersion')]",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "accountType": "[parameters('storageAccountType')]"
+            }
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts",
+            "name": "[variables('storageNameC')]",
+            "apiVersion": "[variables('resourceAPIVersion')]",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "accountType": "[parameters('storageAccountType')]"
+            }
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts",
+            "name": "[concat(variables('storageNameN'), copyIndex())]",
+            "apiVersion": "[variables('resourceAPIVersion')]",
+            "location": "[resourceGroup().location]",
+            "copy": {
+                "name": "storageAccountLoop",
+                "count": "[variables('NodeNum')]"
+            },
+            "properties": {
+                "accountType": "[parameters('storageAccountType')]"
+            }
+        },
+        {
+            "type": "Microsoft.Network/publicIPAddresses",
+            "name": "[variables('publicIPAddressName')]",
+            "apiVersion": "[variables('resourceAPIVersion')]",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "publicIPAllocationMethod": "[variables('publicIPAddressType')]"
+            }
+        },
+        {
+            "type": "Microsoft.Network/publicIPAddresses",
+            "name": "[variables('publicIPAddressClientName')]",
+            "apiVersion": "[variables('resourceAPIVersion')]",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "publicIPAllocationMethod": "[variables('publicIPAddressType')]"
+            }
+        },
+        {
+            "type": "Microsoft.Network/networkInterfaces",
+            "name": "[variables('nicNameM')]",
+            "apiVersion": "[variables('resourceAPIVersion')]",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "ipConfigurations": [
+                    {
+                        "name": "ipconfig1",
+                        "properties": {
+                            "privateIPAllocationMethod": "Static",
+                            "privateIPAddress": "[variables('serverAddr')]",
+                            "publicIPAddress": {
+                                "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('publicIPAddressName'))]"
+                            },
+                            "subnet": {
+                                "id": "[concat(resourceID(concat('Microsoft.Network','/','virtualNetworks'),variables('vnetName')),'/subnets/',variables('subnetName'))]"
+                            }
+                        }
+                    }
+                ],
+                "networkSecurityGroup": {
+                    "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('securityGroupName'))]"
+                }
+            },
+            "dependsOn": [
+                "[concat('Microsoft.Network/publicIPAddresses/', variables('publicIPAddressName'))]",
+                "[concat('Microsoft.Network/virtualNetworks/', variables('vnetName'))]",
+                "[concat('Microsoft.Network/networkSecurityGroups/', variables('securityGroupName'))]"
+            ]
+        },
+        {
+            "type": "Microsoft.Network/networkInterfaces",
+            "name": "[variables('nicNameC')]",
+            "apiVersion": "[variables('resourceAPIVersion')]",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "ipConfigurations": [
+                    {
+                        "name": "ipconfig1",
+                        "properties": {
+                            "privateIPAllocationMethod": "Static",
+                            "privateIPAddress": "[variables('clientAddr')]",
+                            "publicIPAddress": {
+                                "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('publicIPAddressClientName'))]"
+                            },
+                            "subnet": {
+                                "id": "[concat(resourceID(concat('Microsoft.Network','/','virtualNetworks'),variables('vnetName')),'/subnets/',variables('subnetName'))]"
+                            }
+                        }
+                    }
+                ],
+                "networkSecurityGroup": {
+                    "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('ClientsecurityGroupName'))]"
+                }
+            },
+            "dependsOn": [
+                "[concat('Microsoft.Network/publicIPAddresses/', variables('publicIPAddressClientName'))]",
+                "[concat('Microsoft.Network/virtualNetworks/', variables('vnetName'))]",
+                "[concat('Microsoft.Network/networkSecurityGroups/', variables('ClientsecurityGroupName'))]"
+            ]
+        },
+        {
+            "type": "Microsoft.Network/networkInterfaces",
+            "name": "[concat(variables('nicNameN'), copyIndex())]",
+            "apiVersion": "[variables('resourceAPIVersion')]",
+            "location": "[resourceGroup().location]",
+            "copy": {
+                "name": "NodeNicLoop",
+                "count": "[variables('NodeNum')]"
+            },
+            "properties": {
+                "ipConfigurations": [
+                    {
+                        "name": "ipconfig1",
+                        "properties": {
+                            "privateIPAllocationMethod": "Static",
+                            "privateIPAddress": "[concat(variables('agentAddr'), add(copyIndex(),4))]",
+                            "subnet": {
+                                "id": "[concat(resourceID(concat('Microsoft.Network','/','virtualNetworks'),variables('vnetName')),'/subnets/',variables('subnetName'))]"
+                            }
+                        }
+                    }
+                ],
+                "networkSecurityGroup": {
+                    "id": "[resourceId('Microsoft.Network/networkSecurityGroups', concat(variables('securityGroupName'),'-sg'))]"
+                }
+            },
+            "dependsOn": [
+                "[concat('Microsoft.Network/virtualNetworks/', variables('vnetName'))]",
+                "[concat('Microsoft.Network/networkSecurityGroups/', variables('securityGroupName'),'-sg')]"
+            ]
+        },
+        {
+            "type": "Microsoft.Compute/virtualMachines",
+            "name": "[variables('vmNameM')]",
+            "apiVersion": "[variables('resourceAPIVersion')]",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "availabilitySet": {
+                    "id": "[resourceId('Microsoft.Compute/availabilitySets', variables('vmAvaM'))]"
+                },
+                "hardwareProfile": {
+                    "vmSize": "[parameters('vmSize')]"
+                },
+                "osProfile": {
+                    "computerName": "[variables('vmNameM')]",
+                    "adminUsername": "[variables('adminUsername')]",
+                    "adminPassword": "[variables('adminPassword')]"
+                },
+                "storageProfile": {
+                    "imageReference": {
+                        "publisher": "[variables('imagePublisher')]",
+                        "offer": "[variables('imageOffer')]",
+                        "sku": "[parameters('CentOSVersion')]",
+                        "version": "latest"
+                    },
+                    "osDisk": {
+                        "name": "osdisk",
+                        "vhd": {
+                            "uri": "[concat(reference(concat('Microsoft.Storage/storageAccounts/', variables('storageNameM')), '2016-01-01').primaryEndpoints.blob, variables('vmStorageAccountContainerName'),'/',variables('OSDiskName'),'.vhd')]"
+                        },
+                        "caching": "ReadWrite",
+                        "createOption": "FromImage"
+                    },
+                    "dataDisks": [
+                        {
+                            "name": "datadisk1",
+                            "diskSizeGB": "100",
+                            "lun": 0,
+                            "vhd": {
+                                "uri": "[concat(reference(concat('Microsoft.Storage/storageAccounts/', variables('storageNameM')), '2016-01-01').primaryEndpoints.blob, variables('vmStorageAccountContainerName'),'/',variables('dataDisk1VhdName'),'.vhd')]"
+                            },
+                            "createOption": "Empty"
+                        }
+                    ]
+                },
+                "networkProfile": {
+                    "networkInterfaces": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces',variables('nicNameM'))]"
+                        }
+                    ]
+                },
+                "diagnosticsProfile": {
+                    "bootDiagnostics": {
+                        "enabled": "true",
+                        "storageUri": "[concat(reference(concat('Microsoft.Storage/storageAccounts/', variables('storageNameM')), '2016-01-01').primaryEndpoints.blob)]"
+                    }
+                }
+            },
+            "dependsOn": [
+                "[concat('Microsoft.Storage/storageAccounts/', variables('storageNameM'))]",
+                "[concat('Microsoft.Network/networkInterfaces/', variables('nicNameM'))]",
+                "[concat('Microsoft.Compute/availabilitySets/', variables('vmAvaM'))]"
+            ]
+        },
+        {
+            "type": "Microsoft.Compute/virtualMachines",
+            "name": "[variables('vmNameC')]",
+            "apiVersion": "[variables('resourceAPIVersion')]",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "availabilitySet": {
+                    "id": "[resourceId('Microsoft.Compute/availabilitySets', variables('vmAvaC'))]"
+                },
+                "hardwareProfile": {
+                    "vmSize": "[parameters('vmSize')]"
+                },
+                "osProfile": {
+                    "computerName": "[variables('vmNameC')]",
+                    "adminUsername": "[variables('adminUsername')]",
+                    "adminPassword": "[variables('adminPassword')]"
+                },
+                "storageProfile": {
+                    "imageReference": {
+                        "publisher": "[variables('imagePublisher')]",
+                        "offer": "[variables('imageOffer')]",
+                        "sku": "[parameters('CentOSVersion')]",
+                        "version": "latest"
+                    },
+                    "osDisk": {
+                        "name": "osdisk",
+                        "vhd": {
+                            "uri": "[concat(reference(concat('Microsoft.Storage/storageAccounts/', variables('storageNameC')), '2016-01-01').primaryEndpoints.blob, variables('vmStorageAccountContainerName'),'/',variables('OSDiskName'),'.vhd')]"
+                        },
+                        "caching": "ReadWrite",
+                        "createOption": "FromImage"
+                    },
+                    "dataDisks": [
+                        {
+                            "name": "datadisk1",
+                            "diskSizeGB": "100",
+                            "lun": 0,
+                            "vhd": {
+                                "uri": "[concat(reference(concat('Microsoft.Storage/storageAccounts/', variables('storageNameC')), '2016-01-01').primaryEndpoints.blob, variables('vmStorageAccountContainerName'),'/',variables('dataDisk1VhdName'),'.vhd')]"
+                            },
+                            "createOption": "Empty"
+                        }
+                    ]
+                },
+                "networkProfile": {
+                    "networkInterfaces": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces',variables('nicNameC'))]"
+                        }
+                    ]
+                },
+                "diagnosticsProfile": {
+                    "bootDiagnostics": {
+                        "enabled": "true",
+                        "storageUri": "[concat(reference(concat('Microsoft.Storage/storageAccounts/', variables('storageNameC')), '2016-01-01').primaryEndpoints.blob)]"
+                    }
+                }
+            },
+            "dependsOn": [
+                "[concat('Microsoft.Storage/storageAccounts/', variables('storageNameC'))]",
+                "[concat('Microsoft.Network/networkInterfaces/', variables('nicNameC'))]",
+                "[concat('Microsoft.Compute/availabilitySets/', variables('vmAvaC'))]"
+            ]
+        },
+        {
+            "type": "Microsoft.Compute/virtualMachines",
+            "name": "[concat(variables('vmNameN'), add(copyIndex(),1))]",
+            "apiVersion": "[variables('resourceAPIVersion')]",
+            "location": "[resourceGroup().location]",
+            "copy": {
+                "name": "nodeLoop",
+                "count": "[variables('NodeNum')]"
+            },
+            "properties": {
+                "availabilitySet": {
+                    "id": "[resourceId('Microsoft.Compute/availabilitySets', variables('vmAvaN'))]"
+                },
+                "hardwareProfile": {
+                    "vmSize": "[parameters('vmSize')]"
+                },
+                "osProfile": {
+                    "computerName": "[concat(variables('vmNameN'), add(copyIndex(),1))]",
+                    "adminUsername": "[variables('adminUsername')]",
+                    "adminPassword": "[variables('adminPassword')]",
+                    "linuxConfiguration": {
+                        "disablePasswordAuthentication": "false"
+                    }
+                },
+                "storageProfile": {
+                    "imageReference": {
+                        "publisher": "[variables('imagePublisher')]",
+                        "offer": "[variables('imageOffer')]",
+                        "sku": "[parameters('CentOSVersion')]",
+                        "version": "latest"
+                    },
+                    "osDisk": {
+                        "name": "osdisk",
+                        "vhd": {
+                            "uri": "[concat(reference(concat('Microsoft.Storage/storageAccounts/', variables('storageNameN'), copyIndex()), '2016-01-01').primaryEndpoints.blob, variables('vmStorageAccountContainerName'),'/',variables('OSDiskName'),'.vhd')]"
+                        },
+                        "caching": "ReadWrite",
+                        "createOption": "FromImage"
+                    },
+                    "dataDisks": [
+                        {
+                            "name": "datadisk1",
+                            "diskSizeGB": "100",
+                            "lun": 0,
+                            "vhd": {
+                                "uri": "[concat(reference(concat('Microsoft.Storage/storageAccounts/', variables('storageNameN'), copyIndex()), '2016-01-01').primaryEndpoints.blob, variables('vmStorageAccountContainerName'),'/',variables('dataDisk1VhdName'),'.vhd')]"
+                            },
+                            "createOption": "Empty"
+                        }
+                    ]
+                },
+                "networkProfile": {
+                    "networkInterfaces": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces',concat(variables('nicNameN'), copyIndex()))]",
+                            "properties": {
+                                "primary": false
+                            }
+                        }
+                    ]
+                },
+                "diagnosticsProfile": {
+                    "bootDiagnostics": {
+                        "enabled": "true",
+                        "storageUri": "[concat(reference(concat('Microsoft.Storage/storageAccounts/', variables('storageNameN'), copyIndex()), '2016-01-01').primaryEndpoints.blob)]"
+                    }
+                }
+            },
+            "dependsOn": [
+                "[concat('Microsoft.Storage/storageAccounts/', concat(variables('storageNameN'), copyIndex()))]",
+                "[concat('Microsoft.Network/networkInterfaces/', concat(variables('nicNameN'), copyIndex()))]",
+                "[concat('Microsoft.Compute/availabilitySets/', variables('vmAvaN'))]"
+            ]
+        },
+        {
+            "type": "Microsoft.Compute/virtualMachines/extensions",
+            "name": "[concat(variables('vmNameM'), '/crhsetup')]",
+            "apiVersion": "[variables('resourceAPIVersion')]",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "publisher": "Microsoft.Azure.Extensions",
+                "type": "CustomScript",
+                "typeHandlerVersion": "2.0",
+                "autoUpgradeMinorVersion": true,
+                "settings": {
+                    "fileUris": [
+                        "[concat(variables('setupSHuri'), '/master.sh')]"
+                    ],
+                    "commandToExecute": "[concat('sh master.sh ', variables('NodeNum'))]"
+                }
+            },
+            "dependsOn": [
+                "[concat('Microsoft.Compute/virtualMachines/', variables('vmNameM'))]"
+            ]
+        },
+        {
+            "type": "Microsoft.Compute/virtualMachines/extensions",
+            "name": "[concat(variables('vmNameC'), '/crhsetup')]",
+            "apiVersion": "[variables('resourceAPIVersion')]",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "publisher": "Microsoft.Azure.Extensions",
+                "type": "CustomScript",
+                "typeHandlerVersion": "2.0",
+                "autoUpgradeMinorVersion": true,
+                "settings": {
+                    "fileUris": [
+                        "[concat(variables('setupSHuri'), '/node.sh')]"
+                    ],
+                    "commandToExecute": "[concat('sh node.sh ', variables('NodeNum'))]"
+                }
+            },
+            "dependsOn": [
+                "[concat('Microsoft.Compute/virtualMachines/', variables('vmNameC'))]"
+            ]
+        },
+        {
+            "type": "Microsoft.Compute/virtualMachines/extensions",
+            "name": "[concat(variables('vmNameN'), add(copyIndex(),1), '/crhsetup', add(copyIndex(),1))]",
+            "apiVersion": "[variables('resourceAPIVersion')]",
+            "location": "[resourceGroup().location]",
+            "copy": {
+                "name": "nodeLoop",
+                "count": "[variables('NodeNum')]"
+            },
+            "properties": {
+                "publisher": "Microsoft.Azure.Extensions",
+                "type": "CustomScript",
+                "typeHandlerVersion": "2.0",
+                "autoUpgradeMinorVersion": true,
+                "settings": {
+                    "fileUris": [
+                        "[concat(variables('setupSHuri'), '/node.sh')]"
+                    ],
+                    "commandToExecute": "[concat('sh node.sh ', variables('NodeNum'))]"
+                }
+            },
+            "dependsOn": [
+                "[concat('Microsoft.Compute/virtualMachines/', variables('vmNameN'), add(copyIndex(),1))]"
+            ]
+        }
+    ],
+    "outputs": {
+        "crh-end": {
+            "type": "String",
+            "value": "[concat('CRH deploy complete: 1 master, ', variables('NodeNum'), ' node')]"
+        },
+        "crhAddr": {
+            "type": "String",
+            "value": "pls goto --->  publicIPAddresses:8080"
+        },
+        "licenceAddr": {
+            "type": "String",
+            "value": "pls goto --->  publicIPAddresses:9999/Licence"
+        },
+        "ClientAddr": {
+            "type": "String",
+            "value": "IP: ClientpublicIPAddresses"
+        }
+    }
+}
