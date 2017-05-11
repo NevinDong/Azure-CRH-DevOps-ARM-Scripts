@@ -1,17 +1,3 @@
----
-layout: post
-title: "One-click deployment model based on ARM templates"
-author: "Nevin Dong"
-author-link: "#"
-date:   2017-01-01 20:30:43 +08:00
-categories: [DevOps]
-color: "blue"
-excerpt: Redoop and Microsoft worked together through DevOps workshops and hackfest,  using ARM templates to help customers quickly and easily deploy Hadoop cluster and large-scale nodes by just a few clicks, and has successfully published their solution in Azure Marketplace in China.
-language: English
-verticals: [Other]
-
----
-
 
 ## Overview ##
 
